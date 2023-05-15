@@ -363,11 +363,11 @@ void displayStartUp() {
 void warmUpLED() {
   meterStateCharacteristic.writeValue(STATE_WARMUP);
 
-  int countDownSeconds = 60;
+  int countDownSeconds = 5;
   unsigned long jobTimerStart = millis();
   unsigned long jobTimer = jobTimerStart;
 
-  while (millis() - jobTimerStart <= 60 * 1000) {
+  while (millis() - jobTimerStart <= 5 * 1000) {
     unsigned long elapsed = millis() - jobTimer;
 
     if (elapsed > 100) {
@@ -375,7 +375,7 @@ void warmUpLED() {
       oled.setCursor(0, 0);
       oled.setFontType(1);
 
-      countDownSeconds = 60 - ((millis() - jobTimerStart) / 1000);
+      countDownSeconds = 5 - ((millis() - jobTimerStart) / 1000);
 
       oled.print("Warm Up " + String(countDownSeconds) + "s");
       oled.display();
