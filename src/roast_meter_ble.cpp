@@ -8,7 +8,7 @@
 #include "MAX30105.h"
 
 // -- Constant Values --
-#define FIRMWARE_REVISION_STRING "v0.1"
+#define FIRMWARE_REVISION_STRING "v0.2"
 
 #define PIN_RESET 9
 #define DC_JUMPER 1
@@ -175,7 +175,7 @@ void setup() {
   setupParticleSensor();
 
   displayStartUp();
-  warmUpLED();
+  warmUpLED(5);
 }
 
 void loop() {
@@ -370,7 +370,10 @@ void displayStartUp() {
   delay(2000);
 }
 
-void warmUpLED(int duration = 5) {
+void warmUpLED(int duration) {
+  if (duration <= 0)
+    return;
+
   meterStateCharacteristic.writeValue(STATE_WARMUP);
 
   int countDownSeconds = duration;
