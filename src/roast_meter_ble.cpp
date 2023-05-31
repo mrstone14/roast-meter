@@ -1,4 +1,5 @@
 // VERSION 1.0.0
+
 #include <ArduinoBLE.h>
 #include <EEPROM.h>
 #include <SFE_MicroOLED.h>
@@ -88,7 +89,7 @@ void setupParticleSensor();
 // -- Sub Routine Headers --
 
 void displayStartUp();
-void warmUpLED();
+void warmUpLED(int duration);
 void measureSampleJob();
 void displayPleaseLoadSample();
 void displayMeasurement(int rLevel);
@@ -187,11 +188,16 @@ void loop() {
 // -- Setups --
 
 void setupEEPROM() {
+#ifdef ESP32
+  // Flash Wrapper using EEPROM API
+  EEPROM.begin(EEPROM_MAX_LENGTH);
+#endif
+
+#ifdef ARDUINO_ARCH_APOLLO3
+  // Actual EEPROM
   EEPROM.init();
-  // You may choose to enable more or less EEPROM -
-  // Default length is 1024 bytes (if setLength is not called)
   EEPROM.setLength(EEPROM_MAX_LENGTH);
-  // Note: larger sizes will increase RAM usage and execution time
+#endif
 
   // use EEPROM.get(int index, T type) to retrieve
   // an arbitrary type from flash memory
@@ -219,6 +225,10 @@ void setupEEPROM() {
     // store default deviation value in EEPROM
     float deviation_to_store = EEPROM_DEVIATION_DEFAULT;
     EEPROM.put(EEPROM_DEVIATION_IDX, deviation_to_store);
+
+#ifdef ESP32
+    EEPROM.commit();
+#endif
 
     // store default BLE name in EEPROM
     BLE.begin();
@@ -360,14 +370,14 @@ void displayStartUp() {
   delay(2000);
 }
 
-void warmUpLED() {
+void warmUpLED(int duration = 5) {
   meterStateCharacteristic.writeValue(STATE_WARMUP);
 
-  int countDownSeconds = 5;
+  int countDownSeconds = duration;
   unsigned long jobTimerStart = millis();
   unsigned long jobTimer = jobTimerStart;
 
-  while (millis() - jobTimerStart <= 5 * 1000) {
+  while (millis() - jobTimerStart <= duration * 1000) {
     unsigned long elapsed = millis() - jobTimer;
 
     if (elapsed > 100) {
@@ -375,7 +385,7 @@ void warmUpLED() {
       oled.setCursor(0, 0);
       oled.setFontType(1);
 
-      countDownSeconds = 5 - ((millis() - jobTimerStart) / 1000);
+      countDownSeconds = duration - ((millis() - jobTimerStart) / 1000);
 
       oled.print("Warm Up " + String(countDownSeconds) + "s");
       oled.display();
@@ -389,7 +399,7 @@ void warmUpLED() {
 
 unsigned long measureSampleJobTimer = millis();
 void measureSampleJob() {
-  if (millis() - measureSampleJobTimer > 100) {
+  if (millis() - measureSampleJobTimer > 500) {
     int rLevel = particleSensor.getIR();
     long currentDelta = (long)rLevel - (long)unblockedValue;
 
@@ -463,6 +473,10 @@ void bleLEDBrightnessLevelWriten(BLEDevice central, BLECharacteristic characteri
 
   EEPROM.put(EEPROM_LED_BRIGHTNESS_IDX, ledBrightness);
 
+#ifdef ESP32
+  EEPROM.commit();
+#endif
+
   setupParticleSensor();
 }
 
@@ -473,6 +487,10 @@ void bleIntersectionPointWriten(BLEDevice central, BLECharacteristic characteris
   Serial.println(intersectionPoint);
 
   EEPROM.put(EEPROM_INTERSECTION_POINT_IDX, intersectionPoint);
+
+#ifdef ESP32
+  EEPROM.commit();
+#endif
 }
 
 void bleDeviationWriten(BLEDevice central, BLECharacteristic characteristic) {
@@ -482,6 +500,10 @@ void bleDeviationWriten(BLEDevice central, BLECharacteristic characteristic) {
   Serial.println(deviation);
 
   EEPROM.put(EEPROM_DEVIATION_IDX, deviation);
+
+#ifdef ESP32
+  EEPROM.commit();
+#endif
 }
 
 void bleBLENameWriten(BLEDevice central, BLECharacteristic characteristic) {
@@ -533,6 +555,10 @@ void writeStringToEEPROM(int addrOffset, const String &strToWrite) {
   for (int i = 0; i < len; i++) {
     EEPROM.write(addrOffset + 1 + i, strToWrite[i]);
   }
+
+#ifdef ESP32
+  EEPROM.commit();
+#endif
 }
 
 String readStringFromEEPROM(int addrOffset) {
