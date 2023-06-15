@@ -1,7 +1,9 @@
 // VERSION 1.0.0
 
 #include <ArduinoBLE.h>
+#include <AsyncElegantOTA.h>
 #include <EEPROM.h>
+#include <ESPAsyncWebServer.h>
 #include <SparkFun_Qwiic_OLED.h>
 #include <Wire.h>
 #include <res/qw_fnt_31x48.h>
@@ -80,6 +82,8 @@ uint32_t unblockedValue = 30000;  // Average IR at power up
 MAX30105 particleSensor;
 QwiicMicroOLED oled;
 
+AsyncWebServer server(80);
+
 // -- End Global Variables --
 
 // -- Global Setting --
@@ -111,6 +115,8 @@ String bleName;  // !EEPROM setup
 void setupEEPROM();
 void setupBLE();
 void setupParticleSensor();
+void setupOTA();
+void setupAsyncElegantOTA();
 
 // -- Setup Headers --
 
@@ -185,6 +191,7 @@ void setup() {
   Serial.println("setup: serial begin");
 
   Wire.begin();
+  delay(1000);
 
   Serial.println("setup: OLED begin");
   if (oled.begin() == false) {
@@ -207,14 +214,39 @@ void setup() {
   Serial.println("setup: particle sensor begin");
   setupParticleSensor();
 
+  Serial.println("setup: OTA server");
+  setupOTA();
+
   Serial.println("setup: completed");
   displayStartUp();
   warmUpLED(0);
 }
 
+long startUpTime = millis();
+bool isOTASetup = false;
+bool isServerStop = false;
 void loop() {
   measureSampleJob();
   BLE.poll();
+
+  // Wait for connection
+  if (WiFi.softAPgetStationNum() > 0 && !isOTASetup) {
+    Serial.println("Client Connected");
+    Serial.print("IP address: ");
+    Serial.println(WiFi.localIP());
+
+    setupAsyncElegantOTA();
+
+    isOTASetup = true;
+  }
+
+  if (!isOTASetup && !isServerStop && millis() - startUpTime > 1000 * 60 * 1) {
+    Serial.println("OTA Timeout Closing WiFi and Server");
+    server.end();
+    WiFi.mode(WIFI_OFF);
+
+    isServerStop = true;
+  }
 }
 
 // -- End Main Process --
@@ -267,9 +299,7 @@ void setupEEPROM() {
     float ir_offset_to_store = EEPROM_IR_OFFSET_DEFAULT;
     EEPROM.put(EEPROM_IR_OFFSET_IDX, ir_offset_to_store);
 
-#ifdef ESP32
     EEPROM.commit();
-#endif
 
     // store default BLE name in EEPROM
     BLE.begin();
@@ -429,6 +459,33 @@ void setupParticleSensor() {
   particleSensor.enableSlot(2, 0x02);  // Enable only SLOT_IR_LED = 0x02
 }
 
+void setupOTA() {
+  // WiFi.mode(WIFI_STA);
+  // WiFi.begin(bleName, "otaupdate");
+
+  Serial.println("WIFI SSID: " + bleName);
+  Serial.println("WIFI Password: otaupdate");
+
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(bleName, "otaupdate");
+  delay(1000);
+  IPAddress IP = IPAddress(10, 10, 10, 1);
+  IPAddress NMask = IPAddress(255, 255, 255, 0);
+  WiFi.softAPConfig(IP, IP, NMask);
+  IPAddress myIP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(myIP);
+}
+
+void setupAsyncElegantOTA() {
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "Hi! I am Roast Meter.");
+  });
+
+  AsyncElegantOTA.begin(&server);  // Start ElegantOTA
+  server.begin();
+  Serial.println("HTTP server started");
+}
 // -- End Setups --
 
 // Sub Routines
@@ -551,17 +608,17 @@ void displaySensorDirty() {
 }
 
 String agtronDescription(float agtronLevel) {
-  if (agtronLevel <= 20) return String("Overdeveloped");
+  if (agtronLevel <= 20) return String("Over      developed");
   if (agtronLevel <= 30) return String("Very Dark");
   if (agtronLevel < 40) return String("Dark");
-  if (agtronLevel < 50) return String("Medium Dark");
+  if (agtronLevel < 50) return String("Medium    Dark");
   if (agtronLevel < 60) return String("Medium");
-  if (agtronLevel < 70) return String("Medium Light");
+  if (agtronLevel < 70) return String("Medium    Light");
   if (agtronLevel < 80) return String("Light");
-  if (agtronLevel < 90) return String("Very Light");
+  if (agtronLevel < 90) return String("Very      Light");
   if (agtronLevel < 100) return String("Extremely Light");
 
-  return String("Underdeveloped");
+  return String("Under     developed");
 }
 
 void displayMeasurement(float agtronLevel) {
@@ -602,9 +659,7 @@ void bleLEDBrightnessLevelWritten(BLEDevice central, BLECharacteristic character
 
   EEPROM.put(EEPROM_LED_BRIGHTNESS_IDX, ledBrightness);
 
-#ifdef ESP32
   EEPROM.commit();
-#endif
 
   setupParticleSensor();
 }
@@ -617,9 +672,7 @@ void bleIntersectionPointWritten(BLEDevice central, BLECharacteristic characteri
 
   EEPROM.put(EEPROM_INTERSECTION_POINT_IDX, intersectionPoint);
 
-#ifdef ESP32
   EEPROM.commit();
-#endif
 }
 
 void bleDeviationWritten(BLEDevice central, BLECharacteristic characteristic) {
@@ -630,9 +683,7 @@ void bleDeviationWritten(BLEDevice central, BLECharacteristic characteristic) {
 
   EEPROM.put(EEPROM_DEVIATION_IDX, deviation);
 
-#ifdef ESP32
   EEPROM.commit();
-#endif
 }
 
 void bleCoefficient0Written(BLEDevice central, BLECharacteristic characteristic) {
@@ -643,9 +694,7 @@ void bleCoefficient0Written(BLEDevice central, BLECharacteristic characteristic)
 
   EEPROM.put(EEPROM_COEFFICIENT_0_IDX, coefficient_0);
 
-#ifdef ESP32
   EEPROM.commit();
-#endif
 }
 
 void bleCoefficient1Written(BLEDevice central, BLECharacteristic characteristic) {
@@ -656,9 +705,7 @@ void bleCoefficient1Written(BLEDevice central, BLECharacteristic characteristic)
 
   EEPROM.put(EEPROM_COEFFICIENT_1_IDX, coefficient_1);
 
-#ifdef ESP32
   EEPROM.commit();
-#endif
 }
 
 void bleCoefficient2Written(BLEDevice central, BLECharacteristic characteristic) {
@@ -669,9 +716,7 @@ void bleCoefficient2Written(BLEDevice central, BLECharacteristic characteristic)
 
   EEPROM.put(EEPROM_COEFFICIENT_2_IDX, coefficient_2);
 
-#ifdef ESP32
   EEPROM.commit();
-#endif
 }
 
 void bleCoefficient3Written(BLEDevice central, BLECharacteristic characteristic) {
@@ -682,9 +727,7 @@ void bleCoefficient3Written(BLEDevice central, BLECharacteristic characteristic)
 
   EEPROM.put(EEPROM_COEFFICIENT_3_IDX, coefficient_3);
 
-#ifdef ESP32
   EEPROM.commit();
-#endif
 }
 
 void bleIROffsetWritten(BLEDevice central, BLECharacteristic characteristic) {
@@ -695,9 +738,7 @@ void bleIROffsetWritten(BLEDevice central, BLECharacteristic characteristic) {
 
   EEPROM.put(EEPROM_IR_OFFSET_IDX, irOffset);
 
-#ifdef ESP32
   EEPROM.commit();
-#endif
 }
 
 void bleAutoCalibrationWritten(BLEDevice central, BLECharacteristic characteristic) {
