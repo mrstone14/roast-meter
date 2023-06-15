@@ -8,7 +8,7 @@
 #include "MAX30105.h"
 
 // -- Constant Values --
-#define FIRMWARE_REVISION_STRING "v0.2"
+#define FIRMWARE_REVISION_STRING "v0.3"
 
 #define PIN_RESET 9
 #define DC_JUMPER 1
@@ -25,6 +25,13 @@
 #define BLE_UUID_LED_BRIGHTNESS "8313695F-3EA1-458B-BD2A-DF4AEE218514"
 #define BLE_UUID_INTERSECTION_POINT "69548C4B-87D0-4E3E-AC6C-B143C7B2AB30"
 #define BLE_UUID_DEVIATION "D17234FA-0F48-429A-9E9B-F5DB774EF682"
+#define BLE_UUID_COEFFICIENT_0 "C2F27E34-93AD-4445-B008-3B93497E1E3D"
+#define BLE_UUID_COEFFICIENT_1 "4B22319F-307F-440B-99B0-A1D6A485262C"
+#define BLE_UUID_COEFFICIENT_2 "6FAD0CA7-AA9A-4747-B140-B7C0D14B1110"
+#define BLE_UUID_COEFFICIENT_3 "54A41301-4278-4F2B-A42E-9A5576298DA3"
+#define BLE_UUID_IR_OFFSET "15DFB217-B7B8-41B3-97F7-8FD154021F29"
+#define BLE_UUID_AUTO_CALIBRATION "86B7E111-4D13-448E-91C6-428ED0734CD1"
+
 #define BLE_UUID_BLE_NAME "CDE44FD7-4C1E-42A0-8368-531DC87F6B56"
 #define BLE_UUID_UNBLOCK_LEVEL "B8BEFA0C-FFDD-4096-9ACD-208657B4B73C"
 
@@ -41,11 +48,21 @@
 #define EEPROM_VALID_IDX 0                     // 1 byte
 #define EEPROM_VALID_CODE (0xAA)               // uint8
 #define EEPROM_LED_BRIGHTNESS_IDX 1            // 1 byte
-#define EEPROM_LED_BRIGHTNESS_DEFAULT 135      // uint8
+#define EEPROM_LED_BRIGHTNESS_DEFAULT 140      // uint8
 #define EEPROM_INTERSECTION_POINT_IDX 2        // 1 byte
 #define EEPROM_INTERSECTION_POINT_DEFAULT 117  // uint8
 #define EEPROM_DEVIATION_IDX 3                 // 1 byte
 #define EEPROM_DEVIATION_DEFAULT 0.165f        // float 32 bit 4 bytes
+#define EEPROM_COEFFICIENT_0_IDX 7             // 1 byte
+#define EEPROM_COEFFICIENT_0_DEFAULT -8.66f    // float 32 bit 4 bytes
+#define EEPROM_COEFFICIENT_1_IDX 11            // 1 byte
+#define EEPROM_COEFFICIENT_1_DEFAULT 0.773f    // float 32 bit 4 bytes
+#define EEPROM_COEFFICIENT_2_IDX 15            // 1 byte
+#define EEPROM_COEFFICIENT_2_DEFAULT 0.00284f  // float 32 bit 4 bytes
+#define EEPROM_COEFFICIENT_3_IDX 19            // 1 byte
+#define EEPROM_COEFFICIENT_3_DEFAULT 0         // float 32 bit 4 bytes
+#define EEPROM_IR_OFFSET_IDX 23                // 1 byte
+#define EEPROM_IR_OFFSET_DEFAULT 0             // float 32 bit 4 bytes
 #define EEPROM_BLE_NAME_IDX 128                // 64 byte - 1 byte length + 63 ASCII
 
 // -- End EEPROM constants
@@ -72,6 +89,11 @@ int adcRange = 16384;    // Options: 2048, 4096, 8192, --16384--
 // The variable below use to calculate Agtron from IR
 int intersectionPoint = 117;  // !EEPROM setup
 float deviation = 0.165;      // !EEPROM setup
+float coefficient_0 = -8.66;
+float coefficient_1 = 0.773;
+float coefficient_2 = 0.00284;
+float coefficient_3 = 0;
+float irOffset;
 
 // BLE
 String bleName;  // !EEPROM setup
@@ -92,37 +114,33 @@ void displayStartUp();
 void warmUpLED(int duration);
 void measureSampleJob();
 void displayPleaseLoadSample();
-void displayMeasurement(int rLevel);
+void displaySensorDirty();
+void displayMeasurement(float agtronLevel);
 
 // -- End Sub Routine Headers --
 
 // -- BLE Function Headers --
 BLEService roastMeterService(BLE_UUID_ROAST_METER_SERVICE);
 
-BLEDescriptor particleSensorDescriptor("2901", "particle_sensor");
 BLEUnsignedIntCharacteristic particleSensorCharacteristic(BLE_UUID_PARTICLE_SENSOR, BLERead | BLENotify);
-
-BLEDescriptor agtronDescriptor("2901", "agtron");
 BLEByteCharacteristic agtronCharacteristic(BLE_UUID_AGTRON, BLERead | BLENotify);
-
-BLEDescriptor meterStateDescriptor("2901", "meter_state");
 BLEByteCharacteristic meterStateCharacteristic(BLE_UUID_METER_STATE, BLERead | BLENotify);
 
 BLEService settingService(BLE_UUID_SETTING_SERVICE);
 
-BLEDescriptor ledBrightnessLevelDescriptor("2901", "led_brightness_level");
 BLEByteCharacteristic ledBrightnessLevelCharacteristic(BLE_UUID_LED_BRIGHTNESS, BLERead | BLEWrite);
-
-BLEDescriptor intersectionPointDescriptor("2901", "intersection_point");
 BLEByteCharacteristic intersectionPointCharacteristic(BLE_UUID_INTERSECTION_POINT, BLERead | BLEWrite);
-
-BLEDescriptor deviationDescriptor("2901", "deviation");
 BLEFloatCharacteristic deviationCharacteristic(BLE_UUID_DEVIATION, BLERead | BLEWrite);
-
-BLEDescriptor bleNameDescriptor("2901", "ble_name");
+BLEFloatCharacteristic coefficient0Characteristic(BLE_UUID_COEFFICIENT_0, BLERead | BLEWrite);
+BLEFloatCharacteristic coefficient1Characteristic(BLE_UUID_COEFFICIENT_1, BLERead | BLEWrite);
+BLEFloatCharacteristic coefficient2Characteristic(BLE_UUID_COEFFICIENT_2, BLERead | BLEWrite);
+BLEFloatCharacteristic coefficient3Characteristic(BLE_UUID_COEFFICIENT_3, BLERead | BLEWrite);
+BLEFloatCharacteristic irOffsetCharacteristic(BLE_UUID_IR_OFFSET, BLERead | BLEWrite);
+BLEBooleanCharacteristic autoCalibrationCharacteristic(BLE_UUID_AUTO_CALIBRATION, BLERead | BLEWrite);
 BLEStringCharacteristic bleNameCharacteristic(BLE_UUID_BLE_NAME, BLERead | BLEWrite, 64);
 
 BLEService deviceInfomationService(BLE_UUID_DEVICE_INFOMATION_SERVICE);
+
 BLEStringCharacteristic firmwareRevisionCharacteristic(BLE_UUID_FIRMWARE_REVISION, BLERead | BLEWrite, 64);
 
 // -- End BLE Function Headers --
@@ -132,10 +150,16 @@ BLEStringCharacteristic firmwareRevisionCharacteristic(BLE_UUID_FIRMWARE_REVISIO
 void blePeripheralConnectHandler(BLEDevice central);
 void blePeripheralDisconnectHandler(BLEDevice central);
 
-void bleLEDBrightnessLevelWriten(BLEDevice central, BLECharacteristic characteristic);
-void bleIntersectionPointWriten(BLEDevice central, BLECharacteristic characteristic);
-void bleDeviationWriten(BLEDevice central, BLECharacteristic characteristic);
-void bleBLENameWriten(BLEDevice central, BLECharacteristic characteristic);
+void bleLEDBrightnessLevelWritten(BLEDevice central, BLECharacteristic characteristic);
+void bleIntersectionPointWritten(BLEDevice central, BLECharacteristic characteristic);
+void bleDeviationWritten(BLEDevice central, BLECharacteristic characteristic);
+void bleCoefficient0Written(BLEDevice central, BLECharacteristic characteristic);
+void bleCoefficient1Written(BLEDevice central, BLECharacteristic characteristic);
+void bleCoefficient2Written(BLEDevice central, BLECharacteristic characteristic);
+void bleCoefficient3Written(BLEDevice central, BLECharacteristic characteristic);
+void bleIROffsetWritten(BLEDevice central, BLECharacteristic characteristic);
+void bleAutoCalibrationWritten(BLEDevice central, BLECharacteristic characteristic);
+void bleBLENameWritten(BLEDevice central, BLECharacteristic characteristic);
 
 // -- End BLE Handler Headers --
 
@@ -143,7 +167,7 @@ void bleBLENameWriten(BLEDevice central, BLECharacteristic characteristic);
 
 String multiplyChar(char c, int n);
 String stringLastN(String input, int n);
-int mapIRToAgtron(int x);
+float mapIRToAgtron(int rawIR);
 void writeStringToEEPROM(int addrOffset, const String &strToWrite);
 String readStringFromEEPROM(int addrOffset);
 
@@ -175,7 +199,7 @@ void setup() {
   setupParticleSensor();
 
   displayStartUp();
-  warmUpLED(5);
+  warmUpLED(0);
 }
 
 void loop() {
@@ -226,6 +250,21 @@ void setupEEPROM() {
     float deviation_to_store = EEPROM_DEVIATION_DEFAULT;
     EEPROM.put(EEPROM_DEVIATION_IDX, deviation_to_store);
 
+    float coefficient_0_to_store = EEPROM_COEFFICIENT_0_DEFAULT;
+    EEPROM.put(EEPROM_COEFFICIENT_0_IDX, coefficient_0_to_store);
+
+    float coefficient_1_to_store = EEPROM_COEFFICIENT_1_DEFAULT;
+    EEPROM.put(EEPROM_COEFFICIENT_1_IDX, coefficient_1_to_store);
+
+    float coefficient_2_to_store = EEPROM_COEFFICIENT_2_DEFAULT;
+    EEPROM.put(EEPROM_COEFFICIENT_2_IDX, coefficient_2_to_store);
+
+    float coefficient_3_to_store = EEPROM_COEFFICIENT_3_DEFAULT;
+    EEPROM.put(EEPROM_COEFFICIENT_3_IDX, coefficient_3_to_store);
+
+    float ir_offset_to_store = EEPROM_IR_OFFSET_DEFAULT;
+    EEPROM.put(EEPROM_IR_OFFSET_IDX, ir_offset_to_store);
+
 #ifdef ESP32
     EEPROM.commit();
 #endif
@@ -263,8 +302,28 @@ void setupEEPROM() {
   EEPROM.get(EEPROM_DEVIATION_IDX, eeprom_deviation);
   deviation = eeprom_deviation;
   Serial.print("Set deviation to ");
-  Serial.print(deviation);
+  Serial.print(deviation, 4);
   Serial.println();
+
+  EEPROM.get(EEPROM_COEFFICIENT_0_IDX, coefficient_0);
+  Serial.print("Set coefficient_0 to ");
+  Serial.println(coefficient_0, 8);
+
+  EEPROM.get(EEPROM_COEFFICIENT_1_IDX, coefficient_1);
+  Serial.print("Set coefficient_1 to ");
+  Serial.println(coefficient_1, 8);
+
+  EEPROM.get(EEPROM_COEFFICIENT_2_IDX, coefficient_2);
+  Serial.print("Set coefficient_2 to ");
+  Serial.println(coefficient_2, 8);
+
+  EEPROM.get(EEPROM_COEFFICIENT_3_IDX, coefficient_3);
+  Serial.print("Set coefficient_3 to ");
+  Serial.println(coefficient_3, 8);
+
+  EEPROM.get(EEPROM_IR_OFFSET_IDX, irOffset);
+  Serial.print("Set IR Offset to ");
+  Serial.println(irOffset, 3);
 
   bleName = readStringFromEEPROM(EEPROM_BLE_NAME_IDX);
   Serial.println("Set BLE name to " + String(bleName));
@@ -289,6 +348,12 @@ void setupBLE() {
   settingService.addCharacteristic(ledBrightnessLevelCharacteristic);
   settingService.addCharacteristic(intersectionPointCharacteristic);
   settingService.addCharacteristic(deviationCharacteristic);
+  settingService.addCharacteristic(coefficient0Characteristic);
+  settingService.addCharacteristic(coefficient1Characteristic);
+  settingService.addCharacteristic(coefficient2Characteristic);
+  settingService.addCharacteristic(coefficient3Characteristic);
+  settingService.addCharacteristic(irOffsetCharacteristic);
+  settingService.addCharacteristic(autoCalibrationCharacteristic);
   settingService.addCharacteristic(bleNameCharacteristic);
 
   deviceInfomationService.addCharacteristic(firmwareRevisionCharacteristic);
@@ -302,21 +367,22 @@ void setupBLE() {
   BLE.setEventHandler(BLEConnected, blePeripheralConnectHandler);
   BLE.setEventHandler(BLEDisconnected, blePeripheralDisconnectHandler);
 
-  agtronCharacteristic.addDescriptor(agtronDescriptor);
-  particleSensorCharacteristic.addDescriptor(particleSensorDescriptor);
-  meterStateCharacteristic.addDescriptor(meterStateDescriptor);
+  ledBrightnessLevelCharacteristic.setEventHandler(BLEWritten, bleLEDBrightnessLevelWritten);
 
-  ledBrightnessLevelCharacteristic.addDescriptor(ledBrightnessLevelDescriptor);
-  ledBrightnessLevelCharacteristic.setEventHandler(BLEWritten, bleLEDBrightnessLevelWriten);
+  intersectionPointCharacteristic.setEventHandler(BLEWritten, bleIntersectionPointWritten);
 
-  intersectionPointCharacteristic.addDescriptor(intersectionPointDescriptor);
-  intersectionPointCharacteristic.setEventHandler(BLEWritten, bleIntersectionPointWriten);
+  deviationCharacteristic.setEventHandler(BLEWritten, bleDeviationWritten);
 
-  deviationCharacteristic.addDescriptor(deviationDescriptor);
-  deviationCharacteristic.setEventHandler(BLEWritten, bleDeviationWriten);
+  coefficient0Characteristic.setEventHandler(BLEWritten, bleCoefficient0Written);
+  coefficient1Characteristic.setEventHandler(BLEWritten, bleCoefficient1Written);
+  coefficient2Characteristic.setEventHandler(BLEWritten, bleCoefficient2Written);
+  coefficient3Characteristic.setEventHandler(BLEWritten, bleCoefficient3Written);
 
-  bleNameCharacteristic.addDescriptor(bleNameDescriptor);
-  bleNameCharacteristic.setEventHandler(BLEWritten, bleBLENameWriten);
+  irOffsetCharacteristic.setEventHandler(BLEWritten, bleIROffsetWritten);
+
+  autoCalibrationCharacteristic.setEventHandler(BLEWritten, bleAutoCalibrationWritten);
+
+  bleNameCharacteristic.setEventHandler(BLEWritten, bleBLENameWritten);
 
   // Assign current value and setting for BLE Characteristic
   particleSensorCharacteristic.setValue(0);
@@ -326,6 +392,14 @@ void setupBLE() {
   ledBrightnessLevelCharacteristic.setValue(ledBrightness);
   intersectionPointCharacteristic.setValue(intersectionPoint);
   deviationCharacteristic.setValue(deviation);
+  coefficient0Characteristic.setValue(coefficient_0);
+  coefficient0Characteristic.setValue(coefficient_1);
+  coefficient0Characteristic.setValue(coefficient_2);
+  coefficient0Characteristic.setValue(coefficient_3);
+  irOffsetCharacteristic.setValue(irOffset);
+
+  autoCalibrationCharacteristic.setValue(false);
+
   bleNameCharacteristic.setValue(bleName);
 
   firmwareRevisionCharacteristic.writeValue(FIRMWARE_REVISION_STRING);
@@ -339,7 +413,7 @@ void setupBLE() {
 void setupParticleSensor() {
   particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);  // Configure sensor with these settings
 
-  particleSensor.setPulseAmplitudeRed(0);
+  particleSensor.setPulseAmplitudeRed(34);
   particleSensor.setPulseAmplitudeGreen(0);
 
   particleSensor.disableSlots();
@@ -354,8 +428,8 @@ void displayStartUp() {
   oled.clear(PAGE);
   oled.setCursor(0, 0);
   oled.setFontType(1);
-  oled.print("Roast  ");
-  oled.print("Meter  ");
+  oled.println("Roast");
+  oled.println("Meter");
   oled.print(FIRMWARE_REVISION_STRING);
   oled.display();
 
@@ -400,30 +474,42 @@ void warmUpLED(int duration) {
   }
 }
 
+int irLevelAccumulated;
 unsigned long measureSampleJobTimer = millis();
+unsigned long bleUpdateAndNotifyTimer = millis();
 void measureSampleJob() {
-  if (millis() - measureSampleJobTimer > 500) {
-    int rLevel = particleSensor.getIR();
-    long currentDelta = (long)rLevel - (long)unblockedValue;
+  if (millis() - measureSampleJobTimer > 100) {
+    int irLevel = particleSensor.getIR();
+    long currentDelta = irLevel - unblockedValue;
+    irLevelAccumulated = (irLevelAccumulated * 0.5) + (irLevel * 0.5);
 
-    if (currentDelta > (long)100) {
-      int calibratedAgtronLevel = mapIRToAgtron(rLevel / 1000);
+    if (currentDelta > 0) {
+      float calibratedAgtronLevel = mapIRToAgtron(irLevelAccumulated);
 
-      agtronCharacteristic.writeValue(calibratedAgtronLevel);
-      particleSensorCharacteristic.writeValue(rLevel / 1000);
-      meterStateCharacteristic.writeValue(STATE_MEASURED);
+      if (millis() - bleUpdateAndNotifyTimer > 1000) {
+        bleUpdateAndNotifyTimer = millis();
+
+        agtronCharacteristic.writeValue(calibratedAgtronLevel);
+        particleSensorCharacteristic.writeValue((u_int32_t)irLevel);
+        meterStateCharacteristic.writeValue(STATE_MEASURED);
+      }
 
       displayMeasurement(calibratedAgtronLevel);
 
-      Serial.println("real:" + String(rLevel));
-      Serial.println("agtron:" + String(calibratedAgtronLevel));
+      Serial.println("real: " + String(irLevelAccumulated));
+      Serial.print("agtron: ");
+      Serial.println(calibratedAgtronLevel);
       Serial.println("===========================");
     } else {
       agtronCharacteristic.writeValue(0);
       particleSensorCharacteristic.writeValue(0);
       meterStateCharacteristic.writeValue(STATE_READY);
 
-      displayPleaseLoadSample();
+      if (irLevel > 7000) {
+        displaySensorDirty();
+      } else {
+        displayPleaseLoadSample();
+      }
     }
 
     measureSampleJobTimer = millis();
@@ -438,16 +524,40 @@ void displayPleaseLoadSample() {
   oled.display();
 }
 
-void displayMeasurement(int agtronLevel) {
+void displaySensorDirty() {
+  oled.clear(PAGE);
+  oled.setCursor(0, 0);
+  oled.setFontType(1);
+  oled.println("Please");
+  oled.println("Clean");
+  oled.println("Sensor!");
+  oled.display();
+}
+
+String agtronDescription(float agtronLevel) {
+  if (agtronLevel <= 20) return String("Over   Develop");
+  if (agtronLevel <= 30) return String("Very   Dark");
+  if (agtronLevel < 40) return String("Dark");
+  if (agtronLevel < 50) return String("Medium Dark");
+  if (agtronLevel < 60) return String("Medium");
+  if (agtronLevel < 70) return String("Medium Light");
+  if (agtronLevel < 80) return String("Light");
+  if (agtronLevel < 90) return String("Very   Light");
+  if (agtronLevel < 100) return String("Extremely Light");
+
+  return String("Under  Develop");
+}
+
+void displayMeasurement(float agtronLevel) {
   oled.clear(PAGE);
   oled.setCursor(0, 0);
 
-  int centerPadding = 4 - String(agtronLevel).length();
-  String paddingText = multiplyChar(' ', centerPadding);
+  oled.setFontType(2);
+  oled.println(agtronLevel, 1);
 
-  oled.setFontType(3);
-  oled.print(paddingText);
-  oled.print(agtronLevel);
+  oled.setCursor(0, 20);
+  oled.setFontType(1);
+  oled.println(agtronDescription(agtronLevel));
 
   oled.display();
 }
@@ -468,10 +578,10 @@ void blePeripheralDisconnectHandler(BLEDevice central) {
   Serial.println(central.address());
 }
 
-void bleLEDBrightnessLevelWriten(BLEDevice central, BLECharacteristic characteristic) {
+void bleLEDBrightnessLevelWritten(BLEDevice central, BLECharacteristic characteristic) {
   ledBrightness = ledBrightnessLevelCharacteristic.value();
 
-  Serial.print("bleLEDBrightnessLevelWriten event, written: ");
+  Serial.print("bleLEDBrightnessLevelWritten event, written: ");
   Serial.println(ledBrightness);
 
   EEPROM.put(EEPROM_LED_BRIGHTNESS_IDX, ledBrightness);
@@ -483,10 +593,10 @@ void bleLEDBrightnessLevelWriten(BLEDevice central, BLECharacteristic characteri
   setupParticleSensor();
 }
 
-void bleIntersectionPointWriten(BLEDevice central, BLECharacteristic characteristic) {
+void bleIntersectionPointWritten(BLEDevice central, BLECharacteristic characteristic) {
   intersectionPoint = intersectionPointCharacteristic.value();
 
-  Serial.print("bleIntersectionPointWriten event, written: ");
+  Serial.print("bleIntersectionPointWritten event, written: ");
   Serial.println(intersectionPoint);
 
   EEPROM.put(EEPROM_INTERSECTION_POINT_IDX, intersectionPoint);
@@ -496,10 +606,10 @@ void bleIntersectionPointWriten(BLEDevice central, BLECharacteristic characteris
 #endif
 }
 
-void bleDeviationWriten(BLEDevice central, BLECharacteristic characteristic) {
+void bleDeviationWritten(BLEDevice central, BLECharacteristic characteristic) {
   deviation = deviationCharacteristic.value();
 
-  Serial.print("bleDeviationWriten event, written: ");
+  Serial.print("bleDeviationWritten event, written: ");
   Serial.println(deviation);
 
   EEPROM.put(EEPROM_DEVIATION_IDX, deviation);
@@ -509,18 +619,89 @@ void bleDeviationWriten(BLEDevice central, BLECharacteristic characteristic) {
 #endif
 }
 
-void bleBLENameWriten(BLEDevice central, BLECharacteristic characteristic) {
+void bleCoefficient0Written(BLEDevice central, BLECharacteristic characteristic) {
+  coefficient_0 = coefficient0Characteristic.value();
+
+  Serial.print("bleCoefficient0Written event, written: ");
+  Serial.println(coefficient_0);
+
+  EEPROM.put(EEPROM_COEFFICIENT_0_IDX, coefficient_0);
+
+#ifdef ESP32
+  EEPROM.commit();
+#endif
+}
+
+void bleCoefficient1Written(BLEDevice central, BLECharacteristic characteristic) {
+  coefficient_1 = coefficient0Characteristic.value();
+
+  Serial.print("bleCoefficient1Written event, written: ");
+  Serial.println(coefficient_1);
+
+  EEPROM.put(EEPROM_COEFFICIENT_1_IDX, coefficient_1);
+
+#ifdef ESP32
+  EEPROM.commit();
+#endif
+}
+
+void bleCoefficient2Written(BLEDevice central, BLECharacteristic characteristic) {
+  coefficient_2 = coefficient2Characteristic.value();
+
+  Serial.print("bleCoefficient0Written event, written: ");
+  Serial.println(coefficient_2);
+
+  EEPROM.put(EEPROM_COEFFICIENT_2_IDX, coefficient_2);
+
+#ifdef ESP32
+  EEPROM.commit();
+#endif
+}
+
+void bleCoefficient3Written(BLEDevice central, BLECharacteristic characteristic) {
+  coefficient_3 = coefficient3Characteristic.value();
+
+  Serial.print("bleCoefficient3Written event, written: ");
+  Serial.println(coefficient_3);
+
+  EEPROM.put(EEPROM_COEFFICIENT_3_IDX, coefficient_3);
+
+#ifdef ESP32
+  EEPROM.commit();
+#endif
+}
+
+void bleIROffsetWritten(BLEDevice central, BLECharacteristic characteristic) {
+  irOffset = irOffsetCharacteristic.value();
+
+  Serial.print("bleIROffsetWritten event, written: ");
+  Serial.println(irOffset);
+
+  EEPROM.put(EEPROM_IR_OFFSET_IDX, irOffset);
+
+#ifdef ESP32
+  EEPROM.commit();
+#endif
+}
+
+void bleAutoCalibrationWritten(BLEDevice central, BLECharacteristic characteristic) {
+  irOffset = irOffsetCharacteristic.value();
+
+  Serial.print("bleAutoCalibrationWritten event, perform Auto Calibration");
+}
+
+void bleBLENameWritten(BLEDevice central, BLECharacteristic characteristic) {
   String newBLEName = bleNameCharacteristic.value();
 
   if (newBLEName.length() > 63) {
-    Serial.println("bleBLENameWriten event, written rejected!. String length exceed 63.");
+    Serial.println("bleBLENameWritten event, written rejected!. String length exceed 63.");
     bleNameCharacteristic.setValue(bleName.c_str());
 
     return;
   }
 
   bleName = newBLEName;
-  Serial.print("bleBLENameWriten event, written: ");
+  Serial.print("bleBLENameWritten event, written: ");
   Serial.println(bleName);
 
   BLE.setLocalName(bleName.c_str());
@@ -547,8 +728,15 @@ String stringLastN(String input, int n) {
   return (n > 0 && inputSize > n) ? input.substring(inputSize - n) : "";
 }
 
-int mapIRToAgtron(int x) {
-  return round(x - (intersectionPoint - x) * deviation);
+float mapIRToAgtron(int rawIR) {
+  float x = (float)rawIR / 1000;
+  float agtron = coefficient_0;
+
+  if (coefficient_1 != 0) agtron += coefficient_1 * x;
+  if (coefficient_2 != 0) agtron += coefficient_2 * x * x;
+  if (coefficient_3 != 0) agtron += coefficient_3 * x * x * x;
+
+  return agtron;
 }
 
 // https://roboticsbackend.com/arduino-write-string-in-eeprom/
