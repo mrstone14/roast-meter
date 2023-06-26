@@ -1,10 +1,13 @@
 // VERSION 1.0.0
-
 #include <ArduinoBLE.h>
-#include <AsyncElegantOTA.h>
 #include <EEPROM.h>
-#include <ESPAsyncWebServer.h>
+#include <ElegantOTA.h>
+#include <SparkFun_MAX1704x_Fuel_Gauge_Arduino_Library.h>
 #include <SparkFun_Qwiic_OLED.h>
+#include <Version.h>
+#include <WebServer.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
 #include <Wire.h>
 #include <res/qw_fnt_31x48.h>
 #include <res/qw_fnt_5x7.h>
@@ -14,9 +17,9 @@
 #include "MAX30105.h"
 
 // -- Constant Values --
-#define FIRMWARE_REVISION_STRING "v0.3 HH"
+#define FIRMWARE_REVISION_STRING VERSION
 
-#define MEASUREMENT_INTERVAL_MS 100
+#define MEASUREMENT_INTERVAL_MS 200
 
 #define PIN_RESET 9
 #define DC_JUMPER 1
@@ -79,10 +82,34 @@
 
 uint32_t unblockedValue = 30000;  // Average IR at power up
 
+double fuelGuageVoltage = 0;  // Variable to keep track of LiPo voltage
+double fuelGuageSOC = 0;      // Variable to keep track of LiPo state-of-charge (SOC)
+bool fuelGuageAlert;          // Variable to keep track of whether alert has been triggered
+
 MAX30105 particleSensor;
 QwiicMicroOLED oled;
+SFE_MAX1704X lipo;  // Defaults to the MAX17043
 
-AsyncWebServer server(80);
+WebServer server(80);
+
+int iCallBackCount = 0;
+unsigned long lStartTime;
+
+void MyAction_onOTAStart() {
+  iCallBackCount = 0;
+  Serial.printf("OTA update started\n\r");
+  lStartTime = millis();
+}
+
+void MyAction_onOTAProgress() {
+  iCallBackCount = iCallBackCount + 1;
+  Serial.printf("OTA progress, %5.3fs elapsed\n\r", (float)(millis() - lStartTime) / 1000.0);
+}
+
+void MyAction_onOTAEnd() {
+  Serial.printf("OTA update ended, %5.3fs elapsed\n\r", (float)(millis() - lStartTime) / 1000.0);
+  iCallBackCount = 0;
+}
 
 // -- End Global Variables --
 
@@ -112,16 +139,17 @@ String bleName;  // !EEPROM setup
 
 // -- Setup Headers --
 
+void setupFuelGuage();
 void setupEEPROM();
 void setupBLE();
 void setupParticleSensor();
 void setupOTA();
-void setupAsyncElegantOTA();
 
 // -- Setup Headers --
 
 // -- Sub Routine Headers --
 
+void updateFuelGuage(bool force = false);
 void displayStartUp();
 void warmUpLED(int duration);
 void measureSampleJob();
@@ -203,6 +231,12 @@ void setup() {
   oled.erase();
   oled.rectangleFill(0, 0, oled.getWidth(), oled.getHeight());
   oled.display();
+  oled.erase();
+  oled.display();
+
+  Serial.println("setup: Fuel Guage");
+  setupFuelGuage();
+  updateFuelGuage();
 
   Serial.println("setup: EEPROM begin");
   setupEEPROM();
@@ -222,36 +256,57 @@ void setup() {
   warmUpLED(0);
 }
 
-long startUpTime = millis();
-bool isOTASetup = false;
-bool isServerStop = false;
+long lastClientConnectedMillis = millis();
 void loop() {
-  measureSampleJob();
-  BLE.poll();
+  if (WiFi.softAPgetStationNum() > 0) {
+    lastClientConnectedMillis = millis();
+    oled.erase();
+    oled.setCursor(0, 0);
+    oled.setFont(QW_FONT_8X16);
+    oled.println("OTA");
+    oled.println("UPDATE");
+    oled.display();
 
-  // Wait for connection
-  if (WiFi.softAPgetStationNum() > 0 && !isOTASetup) {
-    Serial.println("Client Connected");
-    Serial.print("IP address: ");
-    Serial.println(WiFi.localIP());
+    server.handleClient();
 
-    setupAsyncElegantOTA();
-
-    isOTASetup = true;
+    return;
   }
 
-  if (!isOTASetup && !isServerStop && millis() - startUpTime > 1000 * 60 * 1) {
-    Serial.println("OTA Timeout Closing WiFi and Server");
-    server.end();
-    WiFi.mode(WIFI_OFF);
+  measureSampleJob();
 
-    isServerStop = true;
+  BLE.poll();
+
+  updateFuelGuage();
+
+  if (millis() - lastClientConnectedMillis > 1000 * 60 * 3) {
+    Serial.println("OTA Timeout Closing WiFi and Server");
+    WiFi.mode(WIFI_OFF);
   }
 }
 
 // -- End Main Process --
 
 // -- Setups --
+
+void setupFuelGuage() {
+  // Set up the MAX17043 LiPo fuel gauge:
+  if (lipo.begin() == false)  // Connect to the MAX17043 using the default wire port
+  {
+    Serial.println(F("MAX17043 not detected. Please check wiring. Freezing."));
+    while (1)
+      ;
+  }
+
+  // Quick start restarts the MAX17043 in hopes of getting a more accurate
+  // guess for the SOC.
+  lipo.quickStart();
+
+  // We can set an interrupt to alert when the battery SoC gets too low.
+  // We can alert at anywhere between 1% - 32%:
+  lipo.setThreshold(30);  // Set alert threshold to 20%.
+
+  updateFuelGuage(true);
+}
 
 void setupEEPROM() {
   // Flash Wrapper using EEPROM API
@@ -452,7 +507,7 @@ void setupParticleSensor() {
 
   particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);  // Configure sensor with these settings
 
-  particleSensor.setPulseAmplitudeRed(34);
+  particleSensor.setPulseAmplitudeRed(20);
   particleSensor.setPulseAmplitudeGreen(0);
 
   particleSensor.disableSlots();
@@ -460,9 +515,6 @@ void setupParticleSensor() {
 }
 
 void setupOTA() {
-  // WiFi.mode(WIFI_STA);
-  // WiFi.begin(bleName, "otaupdate");
-
   Serial.println("WIFI SSID: " + bleName);
   Serial.println("WIFI Password: otaupdate");
 
@@ -475,20 +527,52 @@ void setupOTA() {
   IPAddress myIP = WiFi.softAPIP();
   Serial.print("AP IP address: ");
   Serial.println(myIP);
-}
 
-void setupAsyncElegantOTA() {
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "Hi! I am Roast Meter.");
+  server.on("/", []() {
+    server.send(200, "text/plain", "Hi! This is a sample response.");
   });
 
-  AsyncElegantOTA.begin(&server);  // Start ElegantOTA
+  ElegantOTA.begin(&server);  // Start ElegantOTA
   server.begin();
   Serial.println("HTTP server started");
 }
+
 // -- End Setups --
 
 // Sub Routines
+
+long lastFuelGuageUpdateMillis = millis();
+
+void updateFuelGuage(bool force) {
+  if (force || millis() - lastFuelGuageUpdateMillis > 10000) {
+    lastFuelGuageUpdateMillis = millis();
+
+    fuelGuageVoltage = lipo.getVoltage();
+    // lipo.getSOC() returns the estimated state of charge (e.g. 79%)
+    fuelGuageSOC = lipo.getSOC();
+    // lipo.getAlert() returns a 0 or 1 (0=alert not triggered)
+    fuelGuageAlert = lipo.getAlert();
+
+    Serial.print("Fuel Guage Status: ");
+    Serial.print(fuelGuageVoltage, 2);
+    Serial.print("V, ");
+    Serial.print(fuelGuageSOC, 2);
+    Serial.print("%, Alert Flag = ");
+    Serial.println(fuelGuageAlert);
+
+    if (fuelGuageAlert) {
+      Serial.println("Low Battery! Please Charge");
+      oled.erase();
+      oled.setCursor(0, 0);
+      oled.setFont(QW_FONT_8X16);
+      oled.println("LOW");
+      oled.println("BATTERY");
+      oled.display();
+      while (1)
+        ;
+    }
+  }
+}
 
 void displayStartUp() {
   oled.erase();
@@ -560,8 +644,6 @@ void measureSampleJob() {
     long currentDelta = irLevel - unblockedValue;
     irLevelAccumulated = (irLevelAccumulated * 0.5) + (irLevel * 0.5);
 
-    Serial.println("real: " + String(irLevelAccumulated));
-
     if (currentDelta > 0) {
       float calibratedAgtronLevel = mapIRToAgtron(irLevelAccumulated);
 
@@ -571,9 +653,10 @@ void measureSampleJob() {
 
       displayMeasurement(calibratedAgtronLevel);
 
+      Serial.println("real: " + String(irLevelAccumulated));
       Serial.print("agtron: ");
       Serial.println(calibratedAgtronLevel);
-
+      Serial.println("===========================");
     } else {
       agtronCharacteristic.writeValue(0);
       particleSensorCharacteristic.writeValue(0);
@@ -582,7 +665,6 @@ void measureSampleJob() {
       displayPleaseLoadSample();
     }
 
-    Serial.println("===========================");
     measureSampleJobTimer = millis();
   }
 }
@@ -785,13 +867,15 @@ String stringLastN(String input, int n) {
 
 float mapIRToAgtron(int rawIR) {
   float x = (float)rawIR / 1000;
-  float agtron = coefficient_0;
+  // float agtron = coefficient_0;
 
-  if (coefficient_1 != 0) agtron += coefficient_1 * x;
-  if (coefficient_2 != 0) agtron += coefficient_2 * x * x;
-  if (coefficient_3 != 0) agtron += coefficient_3 * x * x * x;
+  // if (coefficient_1 != 0) agtron += coefficient_1 * x;
+  // if (coefficient_2 != 0) agtron += coefficient_2 * x * x;
+  // if (coefficient_3 != 0) agtron += coefficient_3 * x * x * x;
 
-  return agtron;
+  // return agtron;
+
+  return x - (intersectionPoint - x) * deviation;
 }
 
 // https://roboticsbackend.com/arduino-write-string-in-eeprom/
