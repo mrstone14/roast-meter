@@ -560,6 +560,8 @@ void measureSampleJob() {
     long currentDelta = irLevel - unblockedValue;
     irLevelAccumulated = (irLevelAccumulated * 0.5) + (irLevel * 0.5);
 
+    Serial.println("real: " + String(irLevelAccumulated));
+
     if (currentDelta > 0) {
       float calibratedAgtronLevel = mapIRToAgtron(irLevelAccumulated);
 
@@ -569,22 +571,18 @@ void measureSampleJob() {
 
       displayMeasurement(calibratedAgtronLevel);
 
-      Serial.println("real: " + String(irLevelAccumulated));
       Serial.print("agtron: ");
       Serial.println(calibratedAgtronLevel);
-      Serial.println("===========================");
+
     } else {
       agtronCharacteristic.writeValue(0);
       particleSensorCharacteristic.writeValue(0);
       meterStateCharacteristic.writeValue(STATE_READY);
 
-      if (irLevel > 7000) {
-        displaySensorDirty();
-      } else {
-        displayPleaseLoadSample();
-      }
+      displayPleaseLoadSample();
     }
 
+    Serial.println("===========================");
     measureSampleJobTimer = millis();
   }
 }
