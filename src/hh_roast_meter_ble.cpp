@@ -82,9 +82,10 @@
 
 uint32_t unblockedValue = 30000;  // Average IR at power up
 
-double fuelGuageVoltage = 0;  // Variable to keep track of LiPo voltage
-double fuelGuageSOC = 0;      // Variable to keep track of LiPo state-of-charge (SOC)
-bool fuelGuageAlert;          // Variable to keep track of whether alert has been triggered
+float fuelGuageVoltage = 0;     // Variable to keep track of LiPo voltage
+float fuelGuageSOC = 0;         // Variable to keep track of LiPo state-of-charge (SOC)
+bool fuelGuageAlert;            // Variable to keep track of whether alert has been triggered
+float fuelGuageChargeRate = 0;  // Variable to keep track of LiPo charge rate
 
 MAX30105 particleSensor;
 QwiicMicroOLED oled;
@@ -149,6 +150,7 @@ void setupOTA();
 
 // -- Sub Routine Headers --
 
+bool handleWifiAndOTA();
 void updateFuelGuage(bool force = false);
 void displayStartUp();
 void warmUpLED(int duration);
@@ -256,32 +258,14 @@ void setup() {
   warmUpLED(0);
 }
 
-long lastClientConnectedMillis = millis();
 void loop() {
-  if (WiFi.softAPgetStationNum() > 0) {
-    lastClientConnectedMillis = millis();
-    oled.erase();
-    oled.setCursor(0, 0);
-    oled.setFont(QW_FONT_8X16);
-    oled.println("OTA");
-    oled.println("UPDATE");
-    oled.display();
-
-    server.handleClient();
-
-    return;
-  }
-
-  measureSampleJob();
+  if (handleWifiAndOTA()) return;
 
   BLE.poll();
 
   updateFuelGuage();
 
-  if (millis() - lastClientConnectedMillis > 1000 * 60 * 3) {
-    Serial.println("OTA Timeout Closing WiFi and Server");
-    WiFi.mode(WIFI_OFF);
-  }
+  measureSampleJob();
 }
 
 // -- End Main Process --
@@ -541,8 +525,35 @@ void setupOTA() {
 
 // Sub Routines
 
-long lastFuelGuageUpdateMillis = millis();
+long lastClientConnectedMillis = millis();
+bool isServerStop = false;
+bool handleWifiAndOTA() {
+  if (WiFi.softAPgetStationNum() > 0) {
+    lastClientConnectedMillis = millis();
 
+    oled.erase();
+    oled.setCursor(0, 0);
+    oled.setFont(QW_FONT_8X16);
+    oled.println("OTA");
+    oled.println("UPDATE");
+    oled.display();
+
+    server.handleClient();
+
+    return true;
+  }
+
+  if (!isServerStop && millis() - lastClientConnectedMillis > 1000 * 60 * 3) {
+    Serial.println("OTA Timeout Closing WiFi and Server");
+    WiFi.mode(WIFI_OFF);
+
+    isServerStop = true;
+  }
+
+  return false;
+}
+
+long lastFuelGuageUpdateMillis = millis();
 void updateFuelGuage(bool force) {
   if (force || millis() - lastFuelGuageUpdateMillis > 10000) {
     lastFuelGuageUpdateMillis = millis();
@@ -553,14 +564,18 @@ void updateFuelGuage(bool force) {
     // lipo.getAlert() returns a 0 or 1 (0=alert not triggered)
     fuelGuageAlert = lipo.getAlert();
 
+    fuelGuageChargeRate = lipo.getChangeRate();
+
     Serial.print("Fuel Guage Status: ");
     Serial.print(fuelGuageVoltage, 2);
     Serial.print("V, ");
     Serial.print(fuelGuageSOC, 2);
     Serial.print("%, Alert Flag = ");
     Serial.println(fuelGuageAlert);
+    Serial.print("%, Charge Rate = ");
+    Serial.println(lipo.getChangeRate());
 
-    if (fuelGuageAlert) {
+    if ((fuelGuageAlert || fuelGuageVoltage <= 3.8) && lipo.getChangeRate() <= 1.0) {
       Serial.println("Low Battery! Please Charge");
       oled.erase();
       oled.setCursor(0, 0);
@@ -568,8 +583,14 @@ void updateFuelGuage(bool force) {
       oled.println("LOW");
       oled.println("BATTERY");
       oled.display();
-      while (1)
-        ;
+
+      while (lipo.getChangeRate() <= 1.0) {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        if (lipo.getVoltage() <= 3.6) {
+          esp_deep_sleep_start();
+        }
+      }
     }
   }
 }
@@ -584,7 +605,7 @@ void displayStartUp() {
   oled.println(FIRMWARE_REVISION_STRING);
   oled.display();
 
-  delay(4000);
+  delay(3000);
 
   oled.erase();
   oled.setCursor(0, 0);
@@ -592,18 +613,19 @@ void displayStartUp() {
   oled.print(bleName);
   oled.display();
 
-  delay(4000);
+  delay(3000);
 
   oled.erase();
   oled.setCursor(0, 0);
   oled.setFont(QW_FONT_5X7);
-  oled.println("Made By");
+  oled.println("Build By");
   oled.setFont(QW_FONT_8X16);
+  oled.setCursor(0, 13);
   oled.print("HORIZON");
   oled.print("HARVEST");
   oled.display();
 
-  delay(4000);
+  delay(2000);
 }
 
 void warmUpLED(int duration) {
@@ -867,13 +889,16 @@ String stringLastN(String input, int n) {
 
 float mapIRToAgtron(int rawIR) {
   float x = (float)rawIR / 1000;
-  // float agtron = coefficient_0;
 
-  // if (coefficient_1 != 0) agtron += coefficient_1 * x;
-  // if (coefficient_2 != 0) agtron += coefficient_2 * x * x;
-  // if (coefficient_3 != 0) agtron += coefficient_3 * x * x * x;
+  if (intersectionPoint == 0 && deviation == 0) {
+    float agtron = coefficient_0;
 
-  // return agtron;
+    if (coefficient_1 != 0) agtron += coefficient_1 * x;
+    if (coefficient_2 != 0) agtron += coefficient_2 * x * x;
+    if (coefficient_3 != 0) agtron += coefficient_3 * x * x * x;
+
+    return agtron;
+  }
 
   return x - (intersectionPoint - x) * deviation;
 }
