@@ -4,11 +4,11 @@
 #include <ElegantOTA.h>
 #include <SparkFun_MAX1704x_Fuel_Gauge_Arduino_Library.h>
 #include <SparkFun_Qwiic_OLED.h>
-#include <Version.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
 #include <Wire.h>
+#include <__version.h>
 #include <res/qw_fnt_31x48.h>
 #include <res/qw_fnt_5x7.h>
 #include <res/qw_fnt_7segment.h>
@@ -17,7 +17,7 @@
 #include "MAX30105.h"
 
 // -- Constant Values --
-#define FIRMWARE_REVISION_STRING VERSION
+#define FIRMWARE_REVISION_STRING VERSION_COMMIT_HASH
 
 #define MEASUREMENT_INTERVAL_MS 200
 
