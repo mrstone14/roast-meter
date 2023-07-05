@@ -289,6 +289,10 @@ void setupFuelGuage() {
   // We can alert at anywhere between 1% - 32%:
   lipo.setThreshold(30);  // Set alert threshold to 20%.
 
+  lipo.enableSOCAlert();
+
+  delay(1000);
+
   updateFuelGuage(true);
 }
 
@@ -573,24 +577,22 @@ void updateFuelGuage(bool force) {
     Serial.print("%, Alert Flag = ");
     Serial.println(fuelGuageAlert);
     Serial.print("%, Charge Rate = ");
-    Serial.println(lipo.getChangeRate());
+    Serial.println(fuelGuageChargeRate);
 
-    if ((fuelGuageAlert || fuelGuageVoltage <= 3.8) && lipo.getChangeRate() <= 1.0) {
+    if (fuelGuageAlert && fuelGuageChargeRate <= 0.0) {
       Serial.println("Low Battery! Please Charge");
       oled.erase();
       oled.setCursor(0, 0);
       oled.setFont(QW_FONT_8X16);
       oled.println("LOW");
-      oled.println("BATTERY");
+      oled.print("BATTERY");
+      oled.setFont(QW_FONT_5X7);
+      oled.print(fuelGuageVoltage);
+      oled.print("v ");
       oled.display();
 
-      while (lipo.getChangeRate() <= 1.0) {
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-
-        if (lipo.getVoltage() <= 3.6) {
-          esp_deep_sleep_start();
-        }
-      }
+      particleSensor.shutDown();
+      esp_deep_sleep_start();
     }
   }
 }
