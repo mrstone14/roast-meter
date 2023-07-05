@@ -263,7 +263,7 @@ void loop() {
 
   BLE.poll();
 
-  updateFuelGuage();
+  // updateFuelGuage();
 
   measureSampleJob();
 }
@@ -285,13 +285,12 @@ void setupFuelGuage() {
   // guess for the SOC.
   lipo.quickStart();
 
+  lipo.isReset(true);
+  lipo.clearAlert();
+
   // We can set an interrupt to alert when the battery SoC gets too low.
   // We can alert at anywhere between 1% - 32%:
   lipo.setThreshold(30);  // Set alert threshold to 20%.
-
-  lipo.enableSOCAlert();
-
-  delay(1000);
 
   updateFuelGuage(true);
 }
@@ -566,7 +565,7 @@ void updateFuelGuage(bool force) {
     // lipo.getSOC() returns the estimated state of charge (e.g. 79%)
     fuelGuageSOC = lipo.getSOC();
     // lipo.getAlert() returns a 0 or 1 (0=alert not triggered)
-    fuelGuageAlert = lipo.getAlert();
+    fuelGuageAlert = lipo.getAlert(true);
 
     fuelGuageChargeRate = lipo.getChangeRate();
 
@@ -579,7 +578,7 @@ void updateFuelGuage(bool force) {
     Serial.print("%, Charge Rate = ");
     Serial.println(fuelGuageChargeRate);
 
-    if (fuelGuageAlert && fuelGuageChargeRate <= 0.0) {
+    if (fuelGuageVoltage <= 3.6) {
       Serial.println("Low Battery! Please Charge");
       oled.erase();
       oled.setCursor(0, 0);
@@ -591,8 +590,7 @@ void updateFuelGuage(bool force) {
       oled.print("v ");
       oled.display();
 
-      particleSensor.shutDown();
-      esp_deep_sleep_start();
+      delay(3000);
     }
   }
 }
