@@ -141,7 +141,7 @@ String bleName;  // !EEPROM setup
 
 // -- Setup Headers --
 
-//void setupFuelGuage();
+void setupFuelGuage();
 void setupEEPROM();
 void setupBLE();
 void setupParticleSensor();
@@ -152,7 +152,7 @@ void setupOTA();
 // -- Sub Routine Headers --
 
 bool handleWifiAndOTA();
-//void updateFuelGuage(bool force = false);
+void updateFuelGuage(bool force = false);
 void displayStartUp();
 void warmUpLED(int duration);
 void measureSampleJob();
@@ -230,16 +230,16 @@ void setup() {
     while (1)
       ;
   }  // Initialize the OLED
-  Serial.println("setup: OLED ready");
+  Serial.println("setup: OLED begined");
   oled.erase();
   oled.rectangleFill(0, 0, oled.getWidth(), oled.getHeight());
   oled.display();
   oled.erase();
   oled.display();
 
-  //Serial.println("setup: Fuel Guage");
-  //setupFuelGuage();
-  //updateFuelGuage();
+  Serial.println("setup: Fuel Guage");
+  setupFuelGuage();
+  updateFuelGuage();
 
   Serial.println("setup: EEPROM begin");
   setupEEPROM();
@@ -273,28 +273,28 @@ void loop() {
 
 // -- Setups --
 
-//void setupFuelGuage() {
+void setupFuelGuage() {
   // Set up the MAX17043 LiPo fuel gauge:
-  //if (lipo.begin() == false)  // Connect to the MAX17043 using the default wire port
-  //{
-  //  Serial.println(F("MAX17043 not detected. Please check wiring. Freezing."));
-  //  while (1)
-  //    ;
-  //}
+  if (lipo.begin() == false)  // Connect to the MAX17043 using the default wire port
+  {
+    Serial.println(F("MAX17043 not detected. Please check wiring. Freezing."));
+    while (1)
+      ;
+  }
 
   // Quick start restarts the MAX17043 in hopes of getting a more accurate
   // guess for the SOC.
-  //lipo.quickStart();
+  lipo.quickStart();
 
-  //lipo.isReset(true);
-  //lipo.clearAlert();
+  lipo.isReset(true);
+  lipo.clearAlert();
 
   // We can set an interrupt to alert when the battery SoC gets too low.
   // We can alert at anywhere between 1% - 32%:
-  //lipo.setThreshold(30);  // Set alert threshold to 20%.
+  lipo.setThreshold(30);  // Set alert threshold to 20%.
 
-  //updateFuelGuage(true);
-//}
+  updateFuelGuage(true);
+}
 
 void setupEEPROM() {
   // Flash Wrapper using EEPROM API
@@ -536,7 +536,7 @@ bool handleWifiAndOTA() {
     lastClientConnectedMillis = millis();
 
     oled.erase();
-    oled.setCursor(3, 0);
+    oled.setCursor(0, 0);
     oled.setFont(QW_FONT_8X16);
     oled.println("OTA");
     oled.println("UPDATE");
@@ -557,48 +557,48 @@ bool handleWifiAndOTA() {
   return false;
 }
 
-//long lastFuelGuageUpdateMillis = millis();
-//void updateFuelGuage(bool force) {
-  //if (force || millis() - lastFuelGuageUpdateMillis > 10000) {
-    //lastFuelGuageUpdateMillis = millis();
+long lastFuelGuageUpdateMillis = millis();
+void updateFuelGuage(bool force) {
+  if (force || millis() - lastFuelGuageUpdateMillis > 10000) {
+    lastFuelGuageUpdateMillis = millis();
 
-    //fuelGuageVoltage = lipo.getVoltage();
+    fuelGuageVoltage = lipo.getVoltage();
     // lipo.getSOC() returns the estimated state of charge (e.g. 79%)
-    //fuelGuageSOC = lipo.getSOC();
+    fuelGuageSOC = lipo.getSOC();
     // lipo.getAlert() returns a 0 or 1 (0=alert not triggered)
-    //fuelGuageAlert = lipo.getAlert(true);
+    fuelGuageAlert = lipo.getAlert(true);
 
-    //fuelGuageChargeRate = lipo.getChangeRate();
+    fuelGuageChargeRate = lipo.getChangeRate();
 
-    //Serial.print("Fuel Guage Status: ");
-    //Serial.print(fuelGuageVoltage, 2);
-    //Serial.print("V, ");
-    //Serial.print(fuelGuageSOC, 2);
-    //Serial.print("%, Alert Flag = ");
-    //Serial.println(fuelGuageAlert);
-    //Serial.print("%, Charge Rate = ");
-    //Serial.println(fuelGuageChargeRate);
+    Serial.print("Fuel Guage Status: ");
+    Serial.print(fuelGuageVoltage, 2);
+    Serial.print("V, ");
+    Serial.print(fuelGuageSOC, 2);
+    Serial.print("%, Alert Flag = ");
+    Serial.println(fuelGuageAlert);
+    Serial.print("%, Charge Rate = ");
+    Serial.println(fuelGuageChargeRate);
 
-    //if (fuelGuageVoltage <= 3.6) {
-      //Serial.println("Low Battery! Please Charge");
-      //oled.erase();
-      //oled.setCursor(0, 0);
-      //oled.setFont(QW_FONT_8X16);
-      //oled.println("LOW");
-      //oled.print("BATTERY");
-      //oled.setFont(QW_FONT_5X7);
-      //oled.print(fuelGuageVoltage);
-      //oled.print("v ");
-      //oled.display();
+    if (fuelGuageVoltage <= 3.6) {
+      Serial.println("Low Battery! Please Charge");
+      oled.erase();
+      oled.setCursor(0, 0);
+      oled.setFont(QW_FONT_8X16);
+      oled.println("LOW");
+      oled.print("BATTERY");
+      oled.setFont(QW_FONT_5X7);
+      oled.print(fuelGuageVoltage);
+      oled.print("v ");
+      oled.display();
 
-      //delay(3000);
-    //}
-  //}
-//}
+      delay(3000);
+    }
+  }
+}
 
 void displayStartUp() {
   oled.erase();
-  oled.setCursor(3, 0);
+  oled.setCursor(0, 0);
   oled.setFont(QW_FONT_8X16);
   oled.println("ROAST");
   oled.println("METER");
@@ -609,7 +609,7 @@ void displayStartUp() {
   delay(3000);
 
   oled.erase();
-  oled.setCursor(3, 0);
+  oled.setCursor(0, 0);
   oled.setFont(QW_FONT_8X16);
   oled.print(bleName);
   oled.display();
@@ -617,11 +617,11 @@ void displayStartUp() {
   delay(3000);
 
   oled.erase();
-  oled.setCursor(3, 0);
+  oled.setCursor(0, 0);
   oled.setFont(QW_FONT_5X7);
   oled.println("Build By");
   oled.setFont(QW_FONT_8X16);
-  oled.setCursor(3, 13);
+  oled.setCursor(0, 13);
   oled.print("HORIZON");
   oled.print("HARVEST");
   oled.display();
@@ -644,7 +644,7 @@ void warmUpLED(int duration) {
 
     if (elapsed > 100) {
       oled.erase();
-      oled.setCursor(3, 0);
+      oled.setCursor(0, 0);
       oled.setFont(QW_FONT_8X16);
 
       countDownSeconds = duration - ((millis() - jobTimerStart) / 1000);
@@ -694,15 +694,15 @@ void measureSampleJob() {
 
 void displayPleaseLoadSample() {
   oled.erase();
-  oled.setCursor(3, 0);
+  oled.setCursor(0, 0);
   oled.setFont(QW_FONT_8X16);
-  oled.print("Please load sample!");
+  oled.print("Please load   sample!");
   oled.display();
 }
 
 void displaySensorDirty() {
   oled.erase();
-  oled.setCursor(3, 0);
+  oled.setCursor(0, 0);
   oled.setFont(QW_FONT_8X16);
   oled.println("Please");
   oled.println("Clean");
@@ -711,27 +711,27 @@ void displaySensorDirty() {
 }
 
 String agtronDescription(float agtronLevel) {
-  if (agtronLevel <= 20) return String("Over developed");
+  if (agtronLevel <= 20) return String("Over      developed");
   if (agtronLevel <= 30) return String("Very Dark");
   if (agtronLevel < 40) return String("Dark");
-  if (agtronLevel < 50) return String("Medium Dark");
+  if (agtronLevel < 50) return String("Medium    Dark");
   if (agtronLevel < 60) return String("Medium");
-  if (agtronLevel < 70) return String("Medium Light");
+  if (agtronLevel < 70) return String("Medium    Light");
   if (agtronLevel < 80) return String("Light");
-  if (agtronLevel < 90) return String("Very Light");
+  if (agtronLevel < 90) return String("Very      Light");
   if (agtronLevel < 100) return String("Extremely Light");
 
-  return String("Under developed");
+  return String("Under     developed");
 }
 
 void displayMeasurement(float agtronLevel) {
   oled.erase();
-  oled.setCursor(3, 0);
+  oled.setCursor(0, 0);
 
   oled.setFont(QW_FONT_7SEGMENT);
   oled.println(agtronLevel, 1);
 
-  oled.setCursor(3, 24);
+  oled.setCursor(0, 24);
   oled.setFont(QW_FONT_5X7);
   oled.println(agtronDescription(agtronLevel));
 

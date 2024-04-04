@@ -30,7 +30,7 @@ void displayMeasurement(int rLevel) {
 
   if (rLevel == 0) {
     oled.setFontType(1);
-    oled.print("Please load   sample!");
+    oled.print("Please load sample!");
     oled.display();
     return;
   }
